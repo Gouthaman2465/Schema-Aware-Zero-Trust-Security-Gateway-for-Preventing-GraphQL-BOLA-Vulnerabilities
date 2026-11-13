@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VulnShop GraphQL console</title>
+  <style>
+    body {
+      font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 26px 20px 60px;
+      color: #222;
+      background: #fff;
+      line-height: 1.5;
+    }
+    h1 { font-size: 22px; margin-bottom: 2px; }
+    .tagline { color: #777; margin-top: 0; font-size: 14px; }
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 18px 0;
+      padding: 12px 14px;
+      background: #f6f6f6;
+      border: 1px solid #e3e3e3;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    select, button, input {
+      font-size: 14px;
+      padding: 6px 10px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      background: #fff;
+      font-family: inherit;
+    }
+    button { cursor: pointer; }
+    button:hover { background: #f0f0f0; }
+    button.run {
+      background: #1a5fb4;
+      border-color: #1a5fb4;
+      color: #fff;
+      font-weight: 600;
+      padding: 7px 18px;
+    }
+    button.run:hover { background: #17519c; }
+    .mode { margin-left: auto; font-size: 13px; font-weight: 600; }
+    .mode.safe { color: #1a7f37; }
+    .mode.open { color: #b42318; }
+    label.lbl { display: block; font-size: 13px; color: #666; margin: 16px 0 4px; font-weight: 600; }
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      font-family: Consolas, Menlo, monospace;
+      font-size: 13px;
+      padding: 10px 12px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      resize: vertical;
+      background: #fff;
+      color: #222;
+    }
+    #query { height: 120px; }
+    #variables { height: 54px; }
+    .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .presets button { font-size: 12.5px; padding: 5px 9px; }
+    .presets button.atk { border-color: #e3b3ad; color: #a33; }
+    .presets button.ok { border-color: #b7dcc0; color: #1a7f37; }
+    #verdict {
+      margin-top: 18px;
+      padding: 11px 14px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      display: none;
+    }
+    #verdict.blocked { background: #eaf6ec; border: 1px solid #b7dcc0; color: #1a7f37; }
+    #verdict.leaked { background: #fdeceb; border: 1px solid #e3b3ad; color: #b42318; }
+    #verdict.neutral { background: #f6f6f6; border: 1px solid #e3e3e3; color: #555; }
+    #verdict .sub { display: block; font-weight: 400; font-size: 13px; margin-top: 3px; }
+    pre {
+      margin-top: 10px;
+      padding: 12px 14px;
+      background: #fafafa;
+      border: 1px solid #e3e3e3;
+      border-radius: 6px;
+      font-family: Consolas, Menlo, monospace;
+      font-size: 13px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      min-height: 20px;
+    }
+    .foot { margin-top: 22px; font-size: 13px; color: #888; }
+    .foot a { color: #1a5fb4; }
+  </style>
+</head>
+<body>
+  <h1>GraphQL console</h1>
+  <p class="tagline">Type a query, pick who you are, and see whether it is blocked.</p>
+
+  <div class="bar">
+    <label for="user">Send as</label>
+    <select id="user">
+      <option value="token-goutham">Goutham (attacker, owns 101)</option>
+      <option value="token-kumar">Kumar (owns 102)</option>
+      <option value="token-martin">Martin (owns 103)</option>
+      <option value="">no token</option>
+    </select>
+    <button class="run" onclick="run()">Run query</button>
+    <span class="mode" id="mode"></span>
+  </div>
+
+  <label class="lbl">Examples</label>
+  <div class="presets" id="presets"></div>
+
+  <label class="lbl" for="query">Query</label>
+  <textarea id="query" spellcheck="false">{ order(id:103){ id total shippingAddress owner { name email } } }</textarea>
+
+  <label class="lbl" for="variables">Variables (JSON, optional)</label>
+  <textarea id="variables" spellcheck="false">{}</textarea>
+
+  <div id="verdict"></div>
+  <pre id="out">Run a query to see the response.</pre>
+
+  <p class="foot">
+    Endpoint: <code id="endpoint"></code> &middot;
+    <a href="/">back to the shop</a>
+  </p>
+
+  <script>
+    const presets = [
+      { kind: "atk", label: "Read Martin's order 103", query: "{ order(id:103){ id total shippingAddress } }" },
+      { kind: "atk", label: "Martin's profile", query: "{ user(id:3){ id name email } }" },
+      { kind: "atk", label: "Owner email via order", query: "{ order(id:103){ owner{ name email } } }" },
+      { kind: "atk", label: "Alias enumeration", query: "{ a:order(id:101){shippingAddress} b:order(id:102){shippingAddress} c:order(id:103){shippingAddress} }" },
+      { kind: "atk", label: "Id hidden in a variable", query: "query($id: ID!){ order(id:$id){ shippingAddress } }", variables: "{ \"id\": \"103\" }" },
+      { kind: "atk", label: "Introspection", query: "{ __schema { types { name } } }" },
+      { kind: "atk", label: "Rewrite Kumar's address", query: "mutation{ updateOrderAddress(id:102, address:\"HACKED\"){ id shippingAddress } }" },
+      { kind: "ok", label: "My own orders", query: "{ myOrders { id total shippingAddress } }" },
+      { kind: "ok", label: "My own order 101", query: "{ order(id:101){ id total shippingAddress } }" },
+      { kind: "ok", label: "My own profile", query: "{ user(id:1){ id name email } }" },
+      { kind: "ok", label: "Who am I", query: "{ me { id name email } }" }
+    ];
+
+    const viaGateway = location.port === "9000";
+
+    function buildPresets() {
+      const box = document.getElementById("presets");
+      presets.forEach(function (p) {
+        const b = document.createElement("button");
+        b.textContent = p.label;
+        b.className = p.kind;
+        b.onclick = function () {
+          document.getElementById("query").value = p.query;
+          document.getElementById("variables").value = p.variables || "{}";
+        };
+        box.appendChild(b);
+      });
+    }
+
+    function showMode() {
+      const el = document.getElementById("mode");
+      if (viaGateway) {
+        el.textContent = "through the gateway :9000";
+        el.className = "mode safe";
+      } else {
+        el.textContent = "direct to the backend :" + (location.port || "80");
+        el.className = "mode open";
+      }
+      document.getElementById("endpoint").textContent = location.origin + "/graphql";
+    }
+
+    function setVerdict(cls, head, sub) {
+      const v = document.getElementById("verdict");
+      v.className = cls;
+      v.style.display = "block";
+      v.innerHTML = head + (sub ? "<span class=\"sub\">" + sub + "</span>" : "");
+    }
+
+    async function run() {
+      const query = document.getElementById("query").value;
+      const rawVars = document.getElementById("variables").value.trim();
+      const token = document.getElementById("user").value;
+      const out = document.getElementById("out");
+
+      let variables = {};
+      if (rawVars) {
+        try {
+          variables = JSON.parse(rawVars);
+        } catch (e) {
+          setVerdict("neutral", "Variables are not valid JSON", e.message);
+          out.textContent = "";
+          return;
+        }
+      }
+
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = "Bearer " + token;
+
+      out.textContent = "Running...";
+      let res, body;
+      try {
+        res = await fetch("/graphql", {
+          method: "POST",
+          headers: headers,
+          body: JSON.stringify({ query: query, variables: variables }),
+        });
+        body = await res.json();
+      } catch (e) {
+        setVerdict("neutral", "Request failed", e.message);
+        out.textContent = "";
+        return;
+      }
+
+      out.textContent = JSON.stringify(body, null, 2);
+
+      const blocked = !!(body.errors && body.errors.length);
+      const message = blocked ? body.errors[0].message : "";
+
+      if (viaGateway) {
+        if (blocked) {
+          setVerdict("blocked", "BLOCKED by the gateway", "It answered \"" + message + "\" and never forwarded the query.");
+        } else {
+          setVerdict("leaked", "ALLOWED by the gateway", "The gateway decided you own every object in this query.");
+        }
+      } else {
+        if (blocked) {
+          setVerdict("neutral", "Refused by the backend", message);
+        } else {
+          setVerdict("leaked", "LEAKED - no gateway in front", "The backend answered with no ownership check at all.");
+        }
+      }
+    }
+
+    document.getElementById("query").addEventListener("keydown", function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") run();
+    });
+
+    buildPresets();
+    showMode();
+  </script>
+</body>
+</html>

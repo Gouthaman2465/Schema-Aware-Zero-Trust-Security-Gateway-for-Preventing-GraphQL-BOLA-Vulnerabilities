@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VulnShop</title>
+  <style>
+    body {
+      font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      max-width: 620px;
+      margin: 0 auto;
+      padding: 30px 20px;
+      color: #222;
+      background: #fff;
+      line-height: 1.5;
+    }
+    h1 { font-size: 24px; margin-bottom: 4px; }
+    h2 { font-size: 17px; margin-top: 28px; }
+    .tagline { color: #777; margin-top: 0; font-size: 14px; }
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 22px 0;
+      padding: 12px 14px;
+      background: #f6f6f6;
+      border: 1px solid #e3e3e3;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    select, button, input {
+      font-size: 14px;
+      padding: 6px 10px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      background: #fff;
+      font-family: inherit;
+    }
+    input { width: 80px; }
+    button { cursor: pointer; }
+    button:hover { background: #f0f0f0; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 14px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; }
+    th { color: #666; font-weight: 600; }
+    #result {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border: 1px solid #e3e3e3;
+      border-radius: 6px;
+      background: #fafafa;
+      font-size: 14px;
+      display: none;
+    }
+    #result div { margin: 3px 0; }
+    .muted { color: #888; font-size: 14px; }
+    .mode { margin-left: auto; font-size: 13px; font-weight: 600; }
+    .mode.safe { color: #1a7f37; }
+    .mode.open { color: #b42318; }
+  </style>
+</head>
+<body>
+  <h1>VulnShop</h1>
+  <p class="tagline">A small demo store. Sign in to see your orders.</p>
+
+  <div class="bar">
+    <label for="user">Signed in as</label>
+    <select id="user" onchange="loadOrders()">
+      <option value="token-goutham">Goutham</option>
+      <option value="token-kumar">Kumar</option>
+      <option value="token-martin">Martin</option>
+    </select>
+    <span class="mode" id="mode"></span>
+  </div>
+
+  <h2>Your orders</h2>
+  <table id="orders">
+    <thead>
+      <tr><th>Order #</th><th>Item</th><th>Total</th><th>Ships to</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h2>Look up an order</h2>
+  <div class="bar">
+    <label for="orderId">Order #</label>
+    <input id="orderId" value="102">
+    <button onclick="lookup()">Open</button>
+  </div>
+  <div id="result"></div>
+
+  <p class="muted" style="margin-top:22px;">
+    Want to type raw queries? Open the
+    <a href="/static/playground.html" style="color:#1a5fb4;">GraphQL console</a>.
+  </p>
+
+  <script>
+    const rupees = new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    });
+
+    function showMode() {
+      const el = document.getElementById("mode");
+      if (location.port === "9000") {
+        el.textContent = "through the gateway :9000";
+        el.className = "mode safe";
+      } else {
+        el.textContent = "direct to the backend :" + (location.port || "80");
+        el.className = "mode open";
+      }
+    }
+
+    function token() {
+      return document.getElementById("user").value;
+    }
+
+    async function gql(query, variables) {
+      const res = await fetch("/graphql", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token(),
+        },
+        body: JSON.stringify({ query, variables }),
+      });
+      const out = await res.json();
+      return out.data || {};
+    }
+
+    async function loadOrders() {
+      document.getElementById("result").style.display = "none";
+      const data = await gql("{ myOrders { id total shippingAddress product { name } } }");
+      const body = document.querySelector("#orders tbody");
+      body.innerHTML = "";
+      for (const o of data.myOrders || []) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td>#" + o.id + "</td>" +
+          "<td>" + o.product.name + "</td>" +
+          "<td>" + rupees.format(o.total) + "</td>" +
+          "<td>" + o.shippingAddress + "</td>";
+        body.appendChild(tr);
+      }
+    }
+
+    async function lookup() {
+      const id = document.getElementById("orderId").value.trim();
+      const box = document.getElementById("result");
+      box.style.display = "block";
+      box.innerHTML = '<span class="muted">Loading...</span>';
+
+      const data = await gql(
+        "query($id: ID!){ order(id: $id){ id total shippingAddress product { name } owner { name email } } }",
+        { id: id }
+      );
+      const o = data.order;
+      if (!o) {
+        box.innerHTML = '<span class="muted">No order found.</span>';
+        return;
+      }
+      box.innerHTML =
+        "<div><b>Order #" + o.id + "</b></div>" +
+        "<div>Item: " + o.product.name + "</div>" +
+        "<div>Total: " + rupees.format(o.total) + "</div>" +
+        "<div>Ships to: " + o.shippingAddress + "</div>" +
+        "<div>Customer: " + o.owner.name + " (" + o.owner.email + ")</div>";
+    }
+
+    showMode();
+    loadOrders();
+  </script>
+</body>
+</html>
